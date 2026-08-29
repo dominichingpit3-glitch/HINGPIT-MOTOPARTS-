@@ -80,7 +80,7 @@ export const Header: React.FC<HeaderProps> = ({
     { id: 'store', label: 'Store Page' },
     { id: 'seller', label: 'Seller Center' },
     { id: 'dashboard', label: 'Dashboard & Tracker' },
-    { id: 'sql', label: 'SQL Database & Sync', badge: 'Multi-Device' },
+    { id: 'sql', label: 'Supabase & SQL Sync', badge: 'Cloud DB' },
     { id: 'about', label: 'About Us' },
     { id: 'contact', label: 'Contact' },
     { id: 'sitemap', label: 'Site Map' },

@@ -1,10 +1,11 @@
 import { Product, Order, UserProfile, Review } from '../types';
-import { getClientSupabase } from './supabase';
+import { getClientSupabase, saveClientSupabaseCredentials } from './supabase';
 
 export interface DbStatusResponse {
   status: string;
   database: {
     supabase: 'connected' | 'error_or_table_missing' | 'connection_failed' | 'not_configured';
+    supabaseUrl?: string;
     supabaseMessage: string;
     localCache: string;
   };
@@ -15,8 +16,27 @@ export interface DbStatusResponse {
   };
 }
 
+export interface SupabaseDetailedStatus {
+  configured: boolean;
+  status: 'connected' | 'table_missing_or_error' | 'not_configured' | 'connection_failed' | 'error';
+  url: string;
+  message: string;
+  tables: {
+    users: boolean;
+    products: boolean;
+    reviews: boolean;
+    orders: boolean;
+  };
+  counts?: {
+    users: number;
+    products: number;
+    reviews: number;
+    orders: number;
+  };
+}
+
 export const api = {
-  // 0. Database & Supabase Health
+  // 0. Database & Supabase Status
   async getDbStatus(): Promise<DbStatusResponse | null> {
     try {
       const res = await fetch('/api/health');
@@ -24,6 +44,39 @@ export const api = {
       return await res.json();
     } catch (err) {
       return null;
+    }
+  },
+
+  async getSupabaseStatus(): Promise<SupabaseDetailedStatus | null> {
+    try {
+      const res = await fetch('/api/supabase/status');
+      if (!res.ok) return null;
+      return await res.json();
+    } catch (err) {
+      return null;
+    }
+  },
+
+  async configureSupabase(url: string, key: string): Promise<{ success: boolean; message?: string; warning?: string; error?: string }> {
+    try {
+      saveClientSupabaseCredentials(url, key);
+      const res = await fetch('/api/supabase/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, key })
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Failed to connect to Supabase' };
+    }
+  },
+
+  async syncAllToSupabase(): Promise<{ success: boolean; message: string; results?: any }> {
+    try {
+      const res = await fetch('/api/supabase/sync-all', { method: 'POST' });
+      return await res.json();
+    } catch (err: any) {
+      return { success: false, message: err.message || 'Sync failed' };
     }
   },
 
@@ -40,36 +93,8 @@ export const api = {
     }
   },
 
-  async createProduct(product: Partial<Product>): Promise<Product> {
+  async createProduct(product: Partial<Product>): Promise<Product & { _supabase?: any }> {
     try {
-      // Also try direct client Supabase insert if configured
-      const supabase = getClientSupabase();
-      if (supabase && product.id) {
-        try {
-          await supabase.from('products').upsert({
-            id: product.id,
-            title: product.title,
-            brand: product.brand || 'Aftermarket',
-            sku: product.sku || `MP-${Math.floor(1000 + Math.random() * 9000)}`,
-            price: product.price || 0,
-            stock: product.stock || 1,
-            category: product.category || 'All Parts',
-            compatible_bikes: product.compatibleBikes || [],
-            bike_type_target: product.bikeTypeTarget || ['universal'],
-            description: product.description || '',
-            images: product.images || [],
-            rating: 5,
-            seller_id: product.sellerId || '',
-            seller_name: product.sellerName || 'Tuning Shop',
-            seller_gcash: product.sellerGcash || '09XXXXXXXXX',
-            condition: product.condition || 'Brand New',
-            warranty_months: product.warrantyMonths || 6
-          });
-        } catch (err) {
-          console.warn('[Direct Client Supabase Product Notice]:', err);
-        }
-      }
-
       const res = await fetch('/api/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -110,14 +135,6 @@ export const api = {
 
   async deleteProduct(productId: string): Promise<boolean> {
     try {
-      const supabase = getClientSupabase();
-      if (supabase) {
-        try {
-          await supabase.from('products').delete().eq('id', productId);
-        } catch (err) {
-          // ignore
-        }
-      }
       const res = await fetch(`/api/products/${productId}`, { method: 'DELETE' });
       return res.ok;
     } catch (err) {
@@ -154,38 +171,8 @@ export const api = {
     }
   },
 
-  async register(user: Partial<UserProfile>): Promise<{ user: UserProfile; supabaseStatus?: any }> {
+  async register(user: Partial<UserProfile>): Promise<{ user: UserProfile; supabase?: any }> {
     try {
-      // 1. Direct client Supabase insertion if client keys are set
-      const supabase = getClientSupabase();
-      if (supabase) {
-        try {
-          const supabaseRow = {
-            id: user.id || `usr-${Date.now()}`,
-            name: user.name,
-            email: (user.email || '').toLowerCase().trim(),
-            password_hash: user.password || null,
-            phone: user.phone || '',
-            gcash_number: user.gcashNumber || '',
-            role: user.role || 'buyer',
-            store_name: user.storeName || null,
-            address: user.address || '',
-            barangay: user.barangay || null,
-            city: user.city || '',
-            province: user.province || '',
-            zip_code: user.zipCode || null,
-            garage_bikes: user.garageBikes || []
-          };
-          const { error } = await supabase.from('users').upsert(supabaseRow, { onConflict: 'email' });
-          if (!error) {
-            console.log('[Direct Client Supabase] Inserted user account successfully!');
-          }
-        } catch (clientErr) {
-          console.warn('[Direct Client Supabase User Notice]:', clientErr);
-        }
-      }
-
-      // 2. Server API Route (which has server-side Supabase bridge with service key)
       const res = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -195,7 +182,7 @@ export const api = {
       if (!res.ok) throw new Error(data.error || 'Failed to register account');
       return {
         user: data.user,
-        supabaseStatus: data.supabase
+        supabase: data.supabase
       };
     } catch (err: any) {
       console.error('API register error:', err);

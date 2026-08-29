@@ -15,8 +15,8 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = 3000;
 
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.json({ limit: '15mb' }));
+app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 
 // Persistent Server-Side Data Storage Directory
 const DATA_DIR = path.join(process.cwd(), 'server_data');
@@ -27,6 +27,7 @@ if (!fs.existsSync(DATA_DIR)) {
 const PRODUCTS_FILE = path.join(DATA_DIR, 'products.json');
 const ORDERS_FILE = path.join(DATA_DIR, 'orders.json');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
+const SUPABASE_CONFIG_FILE = path.join(DATA_DIR, 'supabase_config.json');
 
 // Helper to read JSON file safely
 function readJsonFile<T>(filePath: string, defaultValue: T): T {
@@ -50,7 +51,7 @@ function writeJsonFile<T>(filePath: string, data: T): void {
   }
 }
 
-// Initialize server data stores - Starts empty (0 preloaded products/accounts as requested)
+// Initialize server data stores - Starts empty (0 preloaded products/accounts)
 if (!fs.existsSync(PRODUCTS_FILE)) {
   writeJsonFile(PRODUCTS_FILE, []);
 }
@@ -62,17 +63,27 @@ if (!fs.existsSync(USERS_FILE)) {
 }
 
 // ==========================================
-// SUPABASE CLIENT INITIALIZATION & BRIDGE
+// SUPABASE CLIENT INITIALIZATION & DYNAMIC BRIDGE
 // ==========================================
 let supabaseClient: SupabaseClient | null = null;
+let currentSupabaseUrl: string = '';
 
-function getSupabaseClient(): SupabaseClient | null {
-  if (supabaseClient) return supabaseClient;
+export function getSupabaseCredentials(): { url: string; key: string } {
+  // Check stored config file first
+  const fileConfig = readJsonFile<{ url?: string; key?: string }>(SUPABASE_CONFIG_FILE, {});
+  
+  const url = fileConfig.url || process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+  const key = fileConfig.key || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_KEY || '';
 
-  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_KEY;
+  return { url: url.trim(), key: key.trim() };
+}
 
-  if (url && key && url.startsWith('http') && key.length > 10) {
+export function getSupabaseClient(forceRefresh: boolean = false): SupabaseClient | null {
+  if (supabaseClient && !forceRefresh) return supabaseClient;
+
+  const { url, key } = getSupabaseCredentials();
+
+  if (url && key && url.startsWith('http') && !url.includes('your-project-id') && key.length > 15) {
     try {
       supabaseClient = createClient(url, key, {
         auth: {
@@ -80,10 +91,14 @@ function getSupabaseClient(): SupabaseClient | null {
           autoRefreshToken: false
         }
       });
+      currentSupabaseUrl = url;
       console.log(`[Supabase Bridge] Initialized connection to ${url}`);
     } catch (err) {
       console.error('[Supabase Bridge] Initialization error:', err);
+      supabaseClient = null;
     }
+  } else {
+    supabaseClient = null;
   }
   return supabaseClient;
 }
@@ -91,12 +106,12 @@ function getSupabaseClient(): SupabaseClient | null {
 // Map UserProfile <-> Supabase users table row
 function mapUserToSupabaseRow(user: any) {
   return {
-    id: user.id,
-    name: user.name,
+    id: user.id || `usr-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+    name: user.name || 'Rider',
     email: (user.email || '').toLowerCase().trim(),
     password_hash: user.password || user.password_hash || null,
-    phone: user.phone || '',
-    gcash_number: user.gcashNumber || user.gcash_number || '',
+    phone: user.phone || '09XXXXXXXXX',
+    gcash_number: user.gcashNumber || user.gcash_number || '09XXXXXXXXX',
     role: user.role || 'buyer',
     store_name: user.storeName || user.store_name || null,
     address: user.address || '',
@@ -104,7 +119,7 @@ function mapUserToSupabaseRow(user: any) {
     city: user.city || '',
     province: user.province || '',
     zip_code: user.zipCode || user.zip_code || null,
-    garage_bikes: user.garageBikes || user.garage_bikes || [],
+    garage_bikes: Array.isArray(user.garageBikes) ? user.garageBikes : (Array.isArray(user.garage_bikes) ? user.garage_bikes : []),
     created_at: user.createdAt || user.created_at || new Date().toISOString()
   };
 }
@@ -131,33 +146,36 @@ function mapSupabaseRowToUser(row: any) {
 
 // Map Product <-> Supabase products table row
 function mapProductToSupabaseRow(p: any) {
+  // Ensure seller_id is null if not an existing valid user id format to prevent FK violations
+  const sellerId = (p.sellerId && typeof p.sellerId === 'string' && p.sellerId.startsWith('usr-')) ? p.sellerId : null;
+
   return {
-    id: p.id,
+    id: p.id || `prod-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
     title: p.title,
     brand: p.brand || 'Aftermarket',
     sku: p.sku || `MP-${Math.floor(1000 + Math.random() * 9000)}`,
     price: Number(p.price) || 0,
     original_price: p.originalPrice ? Number(p.originalPrice) : null,
-    stock: Number(p.stock) || 1,
+    stock: Number(p.stock) >= 0 ? Number(p.stock) : 1,
     category: p.category || 'All Parts',
-    compatible_bikes: p.compatibleBikes || [],
-    bike_type_target: p.bikeTypeTarget || ['universal'],
+    compatible_bikes: Array.isArray(p.compatibleBikes) ? p.compatibleBikes : (Array.isArray(p.compatible_bikes) ? p.compatible_bikes : []),
+    bike_type_target: Array.isArray(p.bikeTypeTarget) ? p.bikeTypeTarget : (Array.isArray(p.bike_type_target) ? p.bike_type_target : ['universal']),
     description: p.description || '',
-    key_features: p.keyFeatures || [],
-    specifications: p.specifications || [],
-    images: p.images || [],
+    key_features: Array.isArray(p.keyFeatures) ? p.keyFeatures : (Array.isArray(p.key_features) ? p.key_features : []),
+    specifications: Array.isArray(p.specifications) ? p.specifications : [],
+    images: Array.isArray(p.images) ? p.images : [],
     rating: Number(p.rating) || 5,
-    review_count: Number(p.reviewCount) || 0,
-    seller_id: p.sellerId || null,
-    seller_name: p.sellerName || 'Tuning Shop',
-    seller_gcash: p.sellerGcash || '09XXXXXXXXX',
-    seller_verified: p.sellerVerified ?? true,
-    is_hot: p.isHot ?? false,
-    is_new: p.isNew ?? true,
-    free_shipping: p.freeShipping ?? false,
+    review_count: Number(p.reviewCount) || (p.reviews ? p.reviews.length : 0),
+    seller_id: sellerId,
+    seller_name: p.sellerName || p.seller_name || 'Tuning Shop',
+    seller_gcash: p.sellerGcash || p.seller_gcash || '09XXXXXXXXX',
+    seller_verified: p.sellerVerified ?? p.seller_verified ?? true,
+    is_hot: p.isHot ?? p.is_hot ?? false,
+    is_new: p.isNew ?? p.is_new ?? true,
+    free_shipping: p.freeShipping ?? p.free_shipping ?? false,
     condition: p.condition || 'Brand New',
-    warranty_months: Number(p.warrantyMonths) || 6,
-    created_at: p.createdAt || new Date().toISOString()
+    warranty_months: Number(p.warrantyMonths) || Number(p.warranty_months) || 6,
+    created_at: p.createdAt || p.created_at || new Date().toISOString()
   };
 }
 
@@ -165,18 +183,18 @@ function mapSupabaseRowToProduct(row: any, reviews: any[] = []) {
   return {
     id: row.id,
     title: row.title,
-    brand: row.brand,
-    sku: row.sku,
+    brand: row.brand || 'Aftermarket',
+    sku: row.sku || `MP-${row.id}`,
     price: Number(row.price),
     originalPrice: row.original_price ? Number(row.original_price) : undefined,
     stock: Number(row.stock),
-    category: row.category,
+    category: row.category || 'All Parts',
     compatibleBikes: Array.isArray(row.compatible_bikes) ? row.compatible_bikes : [],
     bikeTypeTarget: Array.isArray(row.bike_type_target) ? row.bike_type_target : ['universal'],
     description: row.description || '',
     keyFeatures: Array.isArray(row.key_features) ? row.key_features : [],
     specifications: Array.isArray(row.specifications) ? row.specifications : [],
-    images: Array.isArray(row.images) ? row.images : [],
+    images: Array.isArray(row.images) && row.images.length > 0 ? row.images : ['https://images.unsplash.com/photo-1558981403-c5f9899a28bc?w=800&auto=format&fit=crop&q=80'],
     rating: Number(row.rating) || 5,
     reviewCount: Number(row.review_count) || reviews.length,
     reviews: reviews,
@@ -189,6 +207,24 @@ function mapSupabaseRowToProduct(row: any, reviews: any[] = []) {
     freeShipping: row.free_shipping ?? false,
     condition: row.condition || 'Brand New',
     warrantyMonths: Number(row.warranty_months) || 6
+  };
+}
+
+// Map Review <-> Supabase reviews table row
+function mapReviewToSupabaseRow(productId: string, r: any) {
+  const userId = (r.userId && typeof r.userId === 'string' && r.userId.startsWith('usr-')) ? r.userId : null;
+  return {
+    id: r.id || `rev-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+    product_id: productId,
+    user_id: userId,
+    user_name: r.userName || r.user_name || 'Rider',
+    user_avatar: r.userAvatar || r.user_avatar || null,
+    gcash_verified: r.gcashVerified ?? r.gcash_verified ?? true,
+    rating: Number(r.rating) || 5,
+    comment: r.comment || '',
+    bike_model: r.bikeModel || r.bike_model || 'Motorcycle',
+    helpful_count: Number(r.helpfulCount) || Number(r.helpful_count) || 0,
+    created_at: r.date ? new Date(r.date).toISOString() : new Date().toISOString()
   };
 }
 
@@ -206,28 +242,250 @@ function getGeminiClient(): GoogleGenAI {
 }
 
 // ==========================================
-// REST API ROUTES (PERSISTENT & SHARED ACROSS ALL DEVICES)
+// REST API ROUTES
 // ==========================================
 
-// 1. Health & Database Status API Route
+// 1. Supabase Status, Test & Live Configuration Endpoints
+app.get('/api/supabase/status', async (req, res) => {
+  const { url, key } = getSupabaseCredentials();
+  const isConfigured = Boolean(url && key && url.startsWith('http') && !url.includes('your-project-id'));
+  
+  if (!isConfigured) {
+    return res.json({
+      configured: false,
+      status: 'not_configured',
+      url: '',
+      message: 'Supabase URL and API Key are not set yet. You can connect by entering your Supabase credentials in the SQL Database & Sync modal.',
+      tables: { users: false, products: false, reviews: false, orders: false }
+    });
+  }
+
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    return res.json({
+      configured: true,
+      status: 'connection_failed',
+      url,
+      message: 'Could not create Supabase client with current credentials.',
+      tables: { users: false, products: false, reviews: false, orders: false }
+    });
+  }
+
+  try {
+    // Check all tables
+    const [uRes, pRes, rRes, oRes] = await Promise.allSettled([
+      supabase.from('users').select('id', { count: 'exact', head: true }),
+      supabase.from('products').select('id', { count: 'exact', head: true }),
+      supabase.from('reviews').select('id', { count: 'exact', head: true }),
+      supabase.from('orders').select('id', { count: 'exact', head: true })
+    ]);
+
+    const usersOk = uRes.status === 'fulfilled' && !uRes.value.error;
+    const prodsOk = pRes.status === 'fulfilled' && !pRes.value.error;
+    const revsOk = rRes.status === 'fulfilled' && !rRes.value.error;
+    const ordersOk = oRes.status === 'fulfilled' && !oRes.value.error;
+
+    const usersCount = (uRes.status === 'fulfilled' && uRes.value.count !== null) ? uRes.value.count : 0;
+    const prodsCount = (pRes.status === 'fulfilled' && pRes.value.count !== null) ? pRes.value.count : 0;
+    const revsCount = (rRes.status === 'fulfilled' && rRes.value.count !== null) ? rRes.value.count : 0;
+    const ordersCount = (oRes.status === 'fulfilled' && oRes.value.count !== null) ? oRes.value.count : 0;
+
+    const allTablesOk = usersOk && prodsOk && revsOk && ordersOk;
+
+    let errorMessage = '';
+    if (!usersOk && uRes.status === 'fulfilled' && uRes.value.error) errorMessage += ` users: ${uRes.value.error.message};`;
+    if (!prodsOk && pRes.status === 'fulfilled' && pRes.value.error) errorMessage += ` products: ${pRes.value.error.message};`;
+
+    res.json({
+      configured: true,
+      status: allTablesOk ? 'connected' : 'table_missing_or_error',
+      url,
+      message: allTablesOk
+        ? `Successfully connected to Supabase (${url})! All tables are active.`
+        : `Connected to Supabase, but some tables are missing: ${errorMessage} Run the SQL schema script in your Supabase SQL Editor.`,
+      tables: {
+        users: usersOk,
+        products: prodsOk,
+        reviews: revsOk,
+        orders: ordersOk
+      },
+      counts: {
+        users: usersCount,
+        products: prodsCount,
+        reviews: revsCount,
+        orders: ordersCount
+      }
+    });
+  } catch (err: any) {
+    res.json({
+      configured: true,
+      status: 'error',
+      url,
+      message: err.message || 'Error communicating with Supabase',
+      tables: { users: false, products: false, reviews: false, orders: false }
+    });
+  }
+});
+
+// Configure Supabase credentials via In-App Modal
+app.post('/api/supabase/config', async (req, res) => {
+  try {
+    const { url, key } = req.body;
+    if (!url || !key) {
+      return res.status(400).json({ error: 'Supabase URL and API Key are required' });
+    }
+
+    const cleanUrl = url.trim();
+    const cleanKey = key.trim();
+
+    // Test creating client and querying
+    const testClient = createClient(cleanUrl, cleanKey, {
+      auth: { persistSession: false, autoRefreshToken: false }
+    });
+
+    const { error } = await testClient.from('users').select('id', { count: 'exact', head: true });
+    
+    // Save to disk
+    writeJsonFile(SUPABASE_CONFIG_FILE, { url: cleanUrl, key: cleanKey });
+    
+    // Refresh client in memory
+    supabaseClient = testClient;
+    currentSupabaseUrl = cleanUrl;
+
+    if (error) {
+      return res.json({
+        success: true,
+        saved: true,
+        warning: `Connected to ${cleanUrl}, but table query returned: "${error.message}". Remember to run the SQL Schema in your Supabase SQL Editor!`
+      });
+    }
+
+    res.json({
+      success: true,
+      saved: true,
+      message: `Successfully connected and synced to Supabase: ${cleanUrl}`
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to save Supabase configuration' });
+  }
+});
+
+// Sync All Local Data directly into Supabase in one click
+app.post('/api/supabase/sync-all', async (req, res) => {
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    return res.status(400).json({ error: 'Supabase is not connected. Please configure your credentials first.' });
+  }
+
+  const localUsers = readJsonFile<any[]>(USERS_FILE, []);
+  const localProducts = readJsonFile<any[]>(PRODUCTS_FILE, []);
+  const localOrders = readJsonFile<any[]>(ORDERS_FILE, []);
+
+  const results: any = { users: 0, products: 0, reviews: 0, orders: 0, errors: [] };
+
+  try {
+    // 1. Sync Users first (to satisfy any FK)
+    for (const u of localUsers) {
+      try {
+        const row = mapUserToSupabaseRow(u);
+        const { error } = await supabase.from('users').upsert(row, { onConflict: 'email' });
+        if (error) results.errors.push(`User ${u.email}: ${error.message}`);
+        else results.users++;
+      } catch (err: any) {
+        results.errors.push(`User ${u.email}: ${err.message}`);
+      }
+    }
+
+    // 2. Sync Products
+    for (const p of localProducts) {
+      try {
+        const row = mapProductToSupabaseRow(p);
+        const { error } = await supabase.from('products').upsert(row, { onConflict: 'id' });
+        if (error) results.errors.push(`Product ${p.title}: ${error.message}`);
+        else results.products++;
+
+        // Sync its reviews if any
+        if (Array.isArray(p.reviews) && p.reviews.length > 0) {
+          for (const r of p.reviews) {
+            try {
+              const revRow = mapReviewToSupabaseRow(p.id, r);
+              const { error: revErr } = await supabase.from('reviews').upsert(revRow, { onConflict: 'id' });
+              if (revErr) results.errors.push(`Review for ${p.title}: ${revErr.message}`);
+              else results.reviews++;
+            } catch (err: any) {
+              results.errors.push(`Review err: ${err.message}`);
+            }
+          }
+        }
+      } catch (err: any) {
+        results.errors.push(`Product ${p.title}: ${err.message}`);
+      }
+    }
+
+    // 3. Sync Orders
+    for (const o of localOrders) {
+      try {
+        const { error } = await supabase.from('orders').upsert({
+          id: o.id,
+          tracking_number: o.trackingNumber || o.tracking_number,
+          user_id: (o.userId && o.userId.startsWith('usr-')) ? o.userId : null,
+          customer_name: o.customerName || o.customer_name,
+          customer_email: o.customerEmail || o.customer_email,
+          customer_phone: o.customerPhone || o.customer_phone,
+          customer_gcash: o.customerGcash || o.customer_gcash,
+          subtotal: Number(o.subtotal),
+          shipping_fee: Number(o.shippingFee || o.shipping_fee) || 0,
+          discount: Number(o.discount) || 0,
+          total_amount: Number(o.totalAmount || o.total_amount),
+          status: o.status || 'Order Placed',
+          payment_method: o.paymentMethod || o.payment_method,
+          payment_ref: o.paymentRef || o.payment_ref,
+          street: o.shippingAddress?.street || o.street || '',
+          barangay: o.shippingAddress?.barangay || o.barangay || '',
+          city: o.shippingAddress?.city || o.city || '',
+          province: o.shippingAddress?.province || o.province || '',
+          zip_code: o.shippingAddress?.zipCode || o.zip_code || '',
+          courier: o.courier || 'J&T Express MotoCargo',
+          estimated_delivery: o.estimatedDelivery || o.estimated_delivery
+        }, { onConflict: 'id' });
+
+        if (error) results.errors.push(`Order ${o.id}: ${error.message}`);
+        else results.orders++;
+      } catch (err: any) {
+        results.errors.push(`Order ${o.id}: ${err.message}`);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Sync completed: ${results.users} users, ${results.products} products, ${results.reviews} reviews, ${results.orders} orders uploaded to Supabase.`,
+      results
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 2. Health & System API Route
 app.get('/api/health', async (req, res) => {
   const products = readJsonFile<any[]>(PRODUCTS_FILE, []);
   const users = readJsonFile<any[]>(USERS_FILE, []);
   const orders = readJsonFile<any[]>(ORDERS_FILE, []);
   const supabase = getSupabaseClient();
+  const { url } = getSupabaseCredentials();
 
   let supabaseStatus = 'not_configured';
-  let supabaseMessage = 'Supabase environment variables (VITE_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY or VITE_SUPABASE_ANON_KEY) can be provided in Settings.';
+  let supabaseMessage = 'Supabase can be connected via in-app SQL Database modal or environment variables.';
 
   if (supabase) {
     try {
       const { data, error } = await supabase.from('users').select('count', { count: 'exact', head: true });
       if (error) {
         supabaseStatus = 'error_or_table_missing';
-        supabaseMessage = `Connected to URL, but queries returned: ${error.message}. Make sure to run the SQL schema migration!`;
+        supabaseMessage = `Connected to ${url}, but queries returned: ${error.message}. Make sure to run the SQL schema migration!`;
       } else {
         supabaseStatus = 'connected';
-        supabaseMessage = 'Supabase PostgreSQL database is active and syncing users, products, and orders.';
+        supabaseMessage = `Supabase PostgreSQL (${url}) is active and storing all accounts, products, and reviews.`;
       }
     } catch (err: any) {
       supabaseStatus = 'connection_failed';
@@ -237,11 +495,12 @@ app.get('/api/health', async (req, res) => {
 
   res.json({
     status: 'ok',
-    service: 'MotoParts Express Shared Cloud & API Gateway',
+    service: 'MotoParts Express Shared Cloud & Supabase Gateway',
     timestamp: new Date().toISOString(),
     multiDeviceSync: 'active',
     database: {
       supabase: supabaseStatus,
+      supabaseUrl: url || '',
       supabaseMessage,
       localCache: 'synced'
     },
@@ -258,7 +517,7 @@ app.get('/api/health', async (req, res) => {
   });
 });
 
-// 2. PRODUCTS API — Shared across all devices + Supabase Sync
+// 3. PRODUCTS API — Reads & Writes to Supabase and Local Cache
 app.get('/api/products', async (req, res) => {
   const localProducts = readJsonFile<any[]>(PRODUCTS_FILE, []);
   const supabase = getSupabaseClient();
@@ -267,14 +526,16 @@ app.get('/api/products', async (req, res) => {
     try {
       const { data: dbProducts, error } = await supabase.from('products').select('*').order('created_at', { ascending: false });
       if (!error && dbProducts) {
-        // Fetch reviews for products
-        const { data: dbReviews } = await supabase.from('reviews').select('*');
+        // Fetch all reviews for products
+        const { data: dbReviews } = await supabase.from('reviews').select('*').order('created_at', { ascending: false });
+        
         const mapped = dbProducts.map(p => {
           const prodReviews = (dbReviews || [])
             .filter((r: any) => r.product_id === p.id)
             .map((r: any) => ({
               id: r.id,
               productId: r.product_id,
+              userId: r.user_id,
               userName: r.user_name,
               userAvatar: r.user_avatar,
               gcashVerified: r.gcash_verified,
@@ -299,7 +560,7 @@ app.get('/api/products', async (req, res) => {
   res.json(localProducts);
 });
 
-// POST /api/products — Upload a new product (Saves to Supabase & Local Cache)
+// POST /api/products — Upload a new product (Stored into Supabase 'products' table)
 app.post('/api/products', async (req, res) => {
   try {
     const newProduct = req.body;
@@ -310,30 +571,30 @@ app.post('/api/products', async (req, res) => {
     const productWithDefaults = {
       ...newProduct,
       id: newProduct.id || `prod-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-      createdAt: new Date().toISOString(),
+      createdAt: newProduct.createdAt || new Date().toISOString(),
       reviews: newProduct.reviews || [],
       rating: newProduct.rating || 5,
-      reviewCount: newProduct.reviewCount || 0
+      reviewCount: newProduct.reviewCount || (newProduct.reviews ? newProduct.reviews.length : 0)
     };
 
-    // Save to Supabase if connected
+    // Save to Supabase
     const supabase = getSupabaseClient();
     let supabaseResult = { stored: false, message: 'Local persistent storage active' };
 
     if (supabase) {
       try {
         const row = mapProductToSupabaseRow(productWithDefaults);
-        const { error } = await supabase.from('products').upsert(row);
+        const { error } = await supabase.from('products').upsert(row, { onConflict: 'id' });
         if (!error) {
-          supabaseResult = { stored: true, message: 'Saved directly to Supabase products table' };
-          console.log(`[Supabase Bridge] Product ${productWithDefaults.title} saved to Supabase!`);
+          supabaseResult = { stored: true, message: 'Successfully saved into Supabase "products" table!' };
+          console.log(`[Supabase Store] Product "${productWithDefaults.title}" stored in Supabase products table.`);
         } else {
-          console.warn(`[Supabase Bridge] Product upsert notice: ${error.message}`);
-          supabaseResult = { stored: false, message: error.message };
+          console.error(`[Supabase Product Error]: ${error.message}`);
+          supabaseResult = { stored: false, message: `Supabase notice: ${error.message}` };
         }
       } catch (err: any) {
-        console.error('[Supabase Bridge] Product save exception:', err);
-        supabaseResult = { stored: false, message: err.message };
+        console.error('[Supabase Product Exception]:', err);
+        supabaseResult = { stored: false, message: `Supabase exception: ${err.message}` };
       }
     }
 
@@ -341,7 +602,7 @@ app.post('/api/products', async (req, res) => {
     const updated = [productWithDefaults, ...products.filter(p => p.id !== productWithDefaults.id)];
     writeJsonFile(PRODUCTS_FILE, updated);
 
-    console.log(`[Product Uploaded] ${productWithDefaults.title} by ${productWithDefaults.sellerName || 'Seller'}. Total items: ${updated.length}`);
+    console.log(`[Product Uploaded] ${productWithDefaults.title} by ${productWithDefaults.sellerName || 'Seller'}. Total: ${updated.length}`);
     res.status(201).json({
       ...productWithDefaults,
       _supabase: supabaseResult
@@ -352,13 +613,14 @@ app.post('/api/products', async (req, res) => {
   }
 });
 
-// DELETE /api/products/:id — Delete a product
+// DELETE /api/products/:id — Delete a product from Supabase & Local Cache
 app.delete('/api/products/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const supabase = getSupabaseClient();
     if (supabase) {
       try {
+        await supabase.from('reviews').delete().eq('product_id', id);
         await supabase.from('products').delete().eq('id', id);
       } catch (err) {
         console.warn('[Supabase Delete Product Notice]:', err);
@@ -374,7 +636,7 @@ app.delete('/api/products/:id', async (req, res) => {
   }
 });
 
-// POST /api/products/:id/reviews — Add star review
+// POST /api/products/:id/reviews — Post Star Review into Supabase 'reviews' table
 app.post('/api/products/:id/reviews', async (req, res) => {
   try {
     const { id } = req.params;
@@ -387,22 +649,22 @@ app.post('/api/products/:id/reviews', async (req, res) => {
     };
 
     const supabase = getSupabaseClient();
+    let supabaseResult = { stored: false, message: 'Local storage' };
+
     if (supabase) {
       try {
-        await supabase.from('reviews').insert({
-          id: reviewItem.id,
-          product_id: id,
-          user_id: newReview.userId || null,
-          user_name: newReview.userName || 'Rider',
-          user_avatar: newReview.userAvatar || null,
-          gcash_verified: newReview.gcashVerified ?? true,
-          rating: Number(newReview.rating) || 5,
-          comment: newReview.comment || '',
-          bike_model: newReview.bikeModel || 'Motorcycle',
-          helpful_count: 0
-        });
-      } catch (err) {
+        const reviewRow = mapReviewToSupabaseRow(id, reviewItem);
+        const { error } = await supabase.from('reviews').upsert(reviewRow, { onConflict: 'id' });
+        if (!error) {
+          supabaseResult = { stored: true, message: 'Successfully inserted into Supabase "reviews" table!' };
+          console.log(`[Supabase Review] Review for product ${id} stored in Supabase.`);
+        } else {
+          console.warn(`[Supabase Review Error]: ${error.message}`);
+          supabaseResult = { stored: false, message: error.message };
+        }
+      } catch (err: any) {
         console.warn('[Supabase Review Insert Notice]:', err);
+        supabaseResult = { stored: false, message: err.message };
       }
     }
 
@@ -411,7 +673,7 @@ app.post('/api/products/:id/reviews', async (req, res) => {
     const updated = products.map(p => {
       if (p.id === id) {
         targetFound = true;
-        const allReviews = [reviewItem, ...(p.reviews || [])];
+        const allReviews = [reviewItem, ...(p.reviews || []).filter((r: any) => r.id !== reviewItem.id)];
         const avg = allReviews.reduce((sum, r) => sum + (Number(r.rating) || 5), 0) / allReviews.length;
         return {
           ...p,
@@ -428,13 +690,18 @@ app.post('/api/products/:id/reviews', async (req, res) => {
     }
 
     writeJsonFile(PRODUCTS_FILE, updated);
-    res.json({ success: true, product: updated.find(p => p.id === id) });
+    res.json({
+      success: true,
+      review: reviewItem,
+      product: updated.find(p => p.id === id),
+      _supabase: supabaseResult
+    });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// 3. USERS & AUTH API — Stored directly into Supabase 'users' table + Local Cache
+// 4. USERS & AUTH API — Stored directly into Supabase 'users' table
 app.get('/api/users', async (req, res) => {
   const localUsers = readJsonFile<any[]>(USERS_FILE, []);
   const supabase = getSupabaseClient();
@@ -492,7 +759,7 @@ app.post('/api/auth/register', async (req, res) => {
     if (supabase) {
       try {
         const supabaseRow = mapUserToSupabaseRow(newUser);
-        const { data, error } = await supabase.from('users').upsert(supabaseRow, { onConflict: 'email' });
+        const { error } = await supabase.from('users').upsert(supabaseRow, { onConflict: 'email' });
         
         if (!error) {
           supabaseStatus = { stored: true, message: 'Successfully inserted into Supabase "users" table!' };
@@ -505,11 +772,9 @@ app.post('/api/auth/register', async (req, res) => {
         console.error('[Supabase Auth Exception]:', err);
         supabaseStatus = { stored: false, message: `Supabase exception: ${err.message}` };
       }
-    } else {
-      console.log('[Supabase Auth] Supabase not yet configured via env vars; using server JSON store.');
     }
 
-    // Save locally as well to ensure zero disruption
+    // Save locally as well
     const users = readJsonFile<any[]>(USERS_FILE, []);
     const filtered = users.filter(u => u.email.toLowerCase() !== newUser.email.toLowerCase());
     const updatedUsers = [newUser, ...filtered];
@@ -611,7 +876,7 @@ app.delete('/api/users/:id', async (req, res) => {
   }
 });
 
-// 4. ORDERS API — Shared across devices + Supabase Sync
+// 5. ORDERS API — Supabase 'orders' & 'order_items' + Local Cache
 app.get('/api/orders', async (req, res) => {
   const localOrders = readJsonFile<any[]>(ORDERS_FILE, []);
   const supabase = getSupabaseClient();
@@ -681,10 +946,12 @@ app.post('/api/orders', async (req, res) => {
     const supabase = getSupabaseClient();
     if (supabase) {
       try {
-        await supabase.from('orders').insert({
+        const userId = (newOrder.userId && typeof newOrder.userId === 'string' && newOrder.userId.startsWith('usr-')) ? newOrder.userId : null;
+        
+        await supabase.from('orders').upsert({
           id: newOrder.id,
           tracking_number: newOrder.trackingNumber,
-          user_id: newOrder.userId || null,
+          user_id: userId,
           customer_name: newOrder.customerName,
           customer_email: newOrder.customerEmail,
           customer_phone: newOrder.customerPhone,
@@ -703,21 +970,21 @@ app.post('/api/orders', async (req, res) => {
           zip_code: newOrder.shippingAddress?.zipCode || '',
           courier: newOrder.courier,
           estimated_delivery: newOrder.estimatedDelivery
-        });
+        }, { onConflict: 'id' });
 
         // Insert items
         if (Array.isArray(newOrder.items)) {
           const itemRows = newOrder.items.map((it: any, idx: number) => ({
             id: `${newOrder.id}-item-${idx}`,
             order_id: newOrder.id,
-            product_id: it.productId || null,
+            product_id: (it.productId && typeof it.productId === 'string' && it.productId.startsWith('prod-')) ? it.productId : null,
             title: it.title,
             brand: it.brand || 'MotoParts',
             price: it.price,
             quantity: it.quantity,
             image: it.image
           }));
-          await supabase.from('order_items').insert(itemRows);
+          await supabase.from('order_items').upsert(itemRows, { onConflict: 'id' });
         }
       } catch (err) {
         console.warn('[Supabase Order Insert Notice]:', err);
@@ -725,7 +992,7 @@ app.post('/api/orders', async (req, res) => {
     }
 
     const orders = readJsonFile<any[]>(ORDERS_FILE, []);
-    const updatedOrders = [newOrder, ...orders];
+    const updatedOrders = [newOrder, ...orders.filter(o => o.id !== newOrder.id)];
     writeJsonFile(ORDERS_FILE, updatedOrders);
 
     // Decrement stock in products file
@@ -745,7 +1012,7 @@ app.post('/api/orders', async (req, res) => {
   }
 });
 
-// 5. AI Mechanic Ask Endpoint (Gemini API)
+// 6. AI Mechanic Ask Endpoint (Gemini API)
 app.post('/api/mechanic/ask', async (req, res) => {
   try {
     const { bikeModel, query } = req.body;
@@ -780,7 +1047,7 @@ Provide precise, actionable mechanical tuning advice (carburetor jet sizes, CVT 
   }
 });
 
-// 6. PayMongo GCash Checkout Session Endpoint
+// 7. PayMongo GCash Checkout Session Endpoint
 app.post('/api/paymongo/checkout', async (req, res) => {
   try {
     const { items, orderNumber, customerName } = req.body;
@@ -796,7 +1063,7 @@ app.post('/api/paymongo/checkout', async (req, res) => {
   }
 });
 
-// 7. Clear/Reset all server data endpoint (Clean Slate)
+// 8. Clear/Reset all server data endpoint (Clean Slate)
 app.post('/api/admin/clear-all', async (req, res) => {
   const supabase = getSupabaseClient();
   if (supabase) {
