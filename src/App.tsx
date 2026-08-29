@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Header } from './components/Header';
 import { Footer } from './components/Footer';
 import { HeroSection } from './components/HeroSection';
@@ -17,44 +17,22 @@ import { AboutUsModal } from './components/AboutUsModal';
 import { ContactModal } from './components/ContactModal';
 import { SiteMapModal } from './components/SiteMapModal';
 import { AuthModal } from './components/AuthModal';
+import { SqlSchemaModal } from './components/SqlSchemaModal';
 
 import { Product, Order, UserProfile, CartItem, ActiveView, Review } from './types';
+import { api } from './services/api';
 
 export default function App() {
   // Navigation State
   const [activeView, setActiveView] = useState<ActiveView>('home');
 
-  // One-time cleanup of legacy demo storage to ensure a clean state
-  useEffect(() => {
-    const isCleaned = localStorage.getItem('motoparts_clean_v3');
-    if (!isCleaned) {
-      localStorage.removeItem('motoparts_products');
-      localStorage.removeItem('motoparts_orders');
-      localStorage.removeItem('motoparts_user');
-      localStorage.removeItem('motoparts_cart');
-      localStorage.setItem('motoparts_clean_v3', 'true');
-    }
-  }, []);
-  
-  // Data State with LocalStorage Persistence — Clean State (No preloaded products/accounts)
-  const [products, setProducts] = useState<Product[]>(() => {
-    const saved = localStorage.getItem('motoparts_user_products');
-    return saved ? JSON.parse(saved) : [];
-  });
-
-  const [orders, setOrders] = useState<Order[]>(() => {
-    const saved = localStorage.getItem('motoparts_user_orders');
-    return saved ? JSON.parse(saved) : [];
-  });
-
+  // Shared Multi-Device Data State — starts completely empty (0 preloaded items)
+  const [products, setProducts] = useState<Product[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [registeredAccounts, setRegisteredAccounts] = useState<UserProfile[]>([]);
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
     const saved = localStorage.getItem('motoparts_active_user');
     return saved ? JSON.parse(saved) : null;
-  });
-
-  const [registeredAccounts, setRegisteredAccounts] = useState<UserProfile[]>(() => {
-    const saved = localStorage.getItem('motoparts_registered_accounts');
-    return saved ? JSON.parse(saved) : [];
   });
 
   const [cartItems, setCartItems] = useState<CartItem[]>(() => {
@@ -77,18 +55,34 @@ export default function App() {
   const [isAboutUsOpen, setIsAboutUsOpen] = useState(false);
   const [isContactOpen, setIsContactOpen] = useState(false);
   const [isSiteMapOpen, setIsSiteMapOpen] = useState(false);
+  const [isSqlModalOpen, setIsSqlModalOpen] = useState(false);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [authDefaultMode, setAuthDefaultMode] = useState<'login' | 'register' | 'switch'>('register');
 
-  // Sync state to LocalStorage
-  useEffect(() => {
-    localStorage.setItem('motoparts_user_products', JSON.stringify(products));
-  }, [products]);
+  // Fetch live server products, orders, and users across all devices
+  const syncServerData = useCallback(async () => {
+    try {
+      const [serverProds, serverOrders, serverUsers] = await Promise.all([
+        api.getProducts(),
+        api.getOrders(),
+        api.getUsers()
+      ]);
+      setProducts(serverProds);
+      setOrders(serverOrders);
+      setRegisteredAccounts(serverUsers);
+    } catch (err) {
+      console.warn('Server sync notice:', err);
+    }
+  }, []);
 
+  // Initial fetch and gentle 4-second polling for real-time multi-device sync
   useEffect(() => {
-    localStorage.setItem('motoparts_user_orders', JSON.stringify(orders));
-  }, [orders]);
+    syncServerData();
+    const interval = setInterval(syncServerData, 4000);
+    return () => clearInterval(interval);
+  }, [syncServerData]);
 
+  // Sync active user & cart to LocalStorage
   useEffect(() => {
     if (currentUser) {
       localStorage.setItem('motoparts_active_user', JSON.stringify(currentUser));
@@ -96,10 +90,6 @@ export default function App() {
       localStorage.removeItem('motoparts_active_user');
     }
   }, [currentUser]);
-
-  useEffect(() => {
-    localStorage.setItem('motoparts_registered_accounts', JSON.stringify(registeredAccounts));
-  }, [registeredAccounts]);
 
   useEffect(() => {
     localStorage.setItem('motoparts_user_cart', JSON.stringify(cartItems));
@@ -111,13 +101,10 @@ export default function App() {
     setIsAuthOpen(true);
   };
 
-  const handleRegister = (newUser: UserProfile) => {
-    setRegisteredAccounts(prev => {
-      const exists = prev.some(a => a.id === newUser.id || a.email.toLowerCase() === newUser.email.toLowerCase());
-      if (!exists) return [...prev, newUser];
-      return prev.map(a => a.id === newUser.id ? newUser : a);
-    });
-    setCurrentUser(newUser);
+  const handleRegister = async (newUser: UserProfile) => {
+    const savedUser = await api.register(newUser);
+    setCurrentUser(savedUser);
+    syncServerData();
   };
 
   const handleLogin = (user: UserProfile) => {
@@ -128,16 +115,18 @@ export default function App() {
     setCurrentUser(null);
   };
 
-  const handleDeleteAccount = (userId: string) => {
-    setRegisteredAccounts(prev => prev.filter(a => a.id !== userId));
+  const handleDeleteAccount = async (userId: string) => {
+    await api.deleteUser(userId);
     if (currentUser?.id === userId) {
       setCurrentUser(null);
     }
+    syncServerData();
   };
 
-  const handleUpdateUser = (updated: UserProfile) => {
+  const handleUpdateUser = async (updated: UserProfile) => {
     setCurrentUser(updated);
-    setRegisteredAccounts(prev => prev.map(a => a.id === updated.id ? updated : a));
+    await api.updateUser(updated.id, updated);
+    syncServerData();
   };
 
   // Cart Handlers
@@ -177,40 +166,34 @@ export default function App() {
   };
 
   // On Order Complete
-  const handleOrderComplete = (newOrder: Order) => {
+  const handleOrderComplete = async (newOrder: Order) => {
     setOrders(prev => [newOrder, ...prev]);
-    
-    // Decrement stock for ordered products
-    newOrder.items.forEach(orderedItem => {
-      setProducts(prevProds =>
-        prevProds.map(p =>
-          p.id === orderedItem.productId
-            ? { ...p, stock: Math.max(0, p.stock - orderedItem.quantity) }
-            : p
-        )
-      );
-    });
-
+    await api.createOrder(newOrder);
     setCartItems([]);
+    syncServerData();
   };
 
-  // Add Product from Seller Portal
-  const handleAddProduct = (newProduct: Product) => {
-    setProducts(prev => [newProduct, ...prev]);
+  // Add Product from Seller Portal — Broadcasts to all devices
+  const handleAddProduct = async (newProduct: Product) => {
+    const created = await api.createProduct(newProduct);
+    setProducts(prev => [created, ...prev.filter(p => p.id !== created.id)]);
     setActiveView('store');
+    syncServerData();
   };
 
   // Delete Product
-  const handleDeleteProduct = (productId: string) => {
+  const handleDeleteProduct = async (productId: string) => {
+    await api.deleteProduct(productId);
     setProducts(prev => prev.filter(p => p.id !== productId));
     setCartItems(prev => prev.filter(item => item.product.id !== productId));
     if (selectedProduct?.id === productId) {
       setSelectedProduct(null);
     }
+    syncServerData();
   };
 
   // Add Star Review
-  const handleAddReview = (productId: string, newReview: Omit<Review, 'id' | 'date' | 'helpfulCount'>) => {
+  const handleAddReview = async (productId: string, newReview: Omit<Review, 'id' | 'date' | 'helpfulCount'>) => {
     const reviewObj: Review = {
       ...newReview,
       id: `rev-${Date.now()}`,
@@ -241,6 +224,22 @@ export default function App() {
         reviewCount: prev.reviewCount + 1
       } : null);
     }
+
+    await api.addReview(productId, newReview);
+    syncServerData();
+  };
+
+  // Clear All Data back to clean slate
+  const handleClearAllData = async () => {
+    await api.clearAllData();
+    setProducts([]);
+    setOrders([]);
+    setRegisteredAccounts([]);
+    setCurrentUser(null);
+    setCartItems([]);
+    localStorage.removeItem('motoparts_active_user');
+    localStorage.removeItem('motoparts_user_cart');
+    setIsSqlModalOpen(false);
   };
 
   const openTechGuidesWithTab = (tab?: string) => {
@@ -265,6 +264,7 @@ export default function App() {
         onOpenContact={() => setIsContactOpen(true)}
         onOpenSiteMap={() => setIsSiteMapOpen(true)}
         onOpenTechGuides={() => openTechGuidesWithTab('github')}
+        onOpenSqlSchema={() => setIsSqlModalOpen(true)}
         onOpenAuth={handleOpenAuth}
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
@@ -363,12 +363,24 @@ export default function App() {
         onOpenContact={() => setIsContactOpen(true)}
         onOpenSiteMap={() => setIsSiteMapOpen(true)}
         onOpenTechGuides={openTechGuidesWithTab}
+        onOpenSqlSchema={() => setIsSqlModalOpen(true)}
         setSelectedBike={setSelectedBike}
       />
 
       {/* MODALS & DRAWERS */}
 
-      {/* 1. Authentication & Account Management Modal */}
+      {/* 1. SQL Database Schema & Multi-Device Sync Modal */}
+      <SqlSchemaModal
+        isOpen={isSqlModalOpen}
+        onClose={() => setIsSqlModalOpen(false)}
+        productCount={products.length}
+        userCount={registeredAccounts.length}
+        orderCount={orders.length}
+        onRefreshData={syncServerData}
+        onClearAll={handleClearAllData}
+      />
+
+      {/* 2. Authentication & Account Management Modal */}
       <AuthModal
         isOpen={isAuthOpen}
         onClose={() => setIsAuthOpen(false)}
@@ -381,7 +393,7 @@ export default function App() {
         defaultMode={authDefaultMode}
       />
 
-      {/* 2. Product Detail & Star Review Modal */}
+      {/* 3. Product Detail & Star Review Modal */}
       <ProductDetailModal
         product={selectedProduct}
         onClose={() => setSelectedProduct(null)}
@@ -392,7 +404,7 @@ export default function App() {
         currentUser={currentUser}
       />
 
-      {/* 3. Shopping Cart Drawer */}
+      {/* 4. Shopping Cart Drawer */}
       <CartDrawer
         isOpen={isCartOpen}
         onClose={() => setIsCartOpen(false)}
@@ -402,7 +414,7 @@ export default function App() {
         onCheckout={() => setIsCheckoutOpen(true)}
       />
 
-      {/* 4. Checkout Modal with PayMongo GCash */}
+      {/* 5. Checkout Modal with PayMongo GCash */}
       <CheckoutModal
         isOpen={isCheckoutOpen}
         onClose={() => setIsCheckoutOpen(false)}
@@ -411,13 +423,13 @@ export default function App() {
         currentUser={currentUser}
       />
 
-      {/* 5. Live Parcel Order Tracking Modal */}
+      {/* 6. Live Parcel Order Tracking Modal */}
       <OrderTrackerModal
         order={activeTrackOrder}
         onClose={() => setActiveTrackOrder(null)}
       />
 
-      {/* 6. AI Mechanic Tuning Chatbot */}
+      {/* 7. AI Mechanic Tuning Chatbot */}
       <AiMechanicChatbot
         isOpen={isAiBotOpen}
         onClose={() => setIsAiBotOpen(false)}
@@ -426,28 +438,28 @@ export default function App() {
         onSelectProduct={(prod) => setSelectedProduct(prod)}
       />
 
-      {/* 7. Technical Stack Integration Guides (GitHub, Vercel, Supabase, PayMongo, Voiceflow, Gemini) */}
+      {/* 8. Technical Stack Integration Guides (GitHub, Vercel, Supabase, PayMongo, Voiceflow, Gemini) */}
       <TechnicalStackGuidesModal
         isOpen={isTechGuidesOpen}
         onClose={() => setIsTechGuidesOpen(false)}
         defaultTab={techGuidesDefaultTab}
       />
 
-      {/* 8. About Us Modal */}
+      {/* 9. About Us Modal */}
       <AboutUsModal
         isOpen={isAboutUsOpen}
         onClose={() => setIsAboutUsOpen(false)}
         onExploreStore={() => setActiveView('store')}
       />
 
-      {/* 9. Contact Us Modal */}
+      {/* 10. Contact Us Modal */}
       <ContactModal
         isOpen={isContactOpen}
         onClose={() => setIsContactOpen(false)}
         onOpenAiBot={() => setIsAiBotOpen(true)}
       />
 
-      {/* 10. Site Map Modal */}
+      {/* 11. Site Map Modal */}
       <SiteMapModal
         isOpen={isSiteMapOpen}
         onClose={() => setIsSiteMapOpen(false)}

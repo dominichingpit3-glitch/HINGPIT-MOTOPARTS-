@@ -28,6 +28,7 @@ interface HeaderProps {
   onOpenContact?: () => void;
   onOpenSiteMap?: () => void;
   onOpenTechGuides?: () => void;
+  onOpenSqlSchema?: () => void;
   onOpenAuth?: (mode?: 'login' | 'register' | 'switch') => void;
   searchQuery: string;
   setSearchQuery: (query: string) => void;
@@ -47,6 +48,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenContact,
   onOpenSiteMap,
   onOpenTechGuides,
+  onOpenSqlSchema,
   onOpenAuth,
   searchQuery,
   setSearchQuery,
@@ -66,6 +68,8 @@ export const Header: React.FC<HeaderProps> = ({
       onOpenContact();
     } else if (id === 'sitemap' && onOpenSiteMap) {
       onOpenSiteMap();
+    } else if (id === 'sql' && onOpenSqlSchema) {
+      onOpenSqlSchema();
     } else if (id === 'docs' && onOpenTechGuides) {
       onOpenTechGuides();
     }
@@ -76,10 +80,11 @@ export const Header: React.FC<HeaderProps> = ({
     { id: 'store', label: 'Store Page' },
     { id: 'seller', label: 'Seller Center' },
     { id: 'dashboard', label: 'Dashboard & Tracker' },
+    { id: 'sql', label: 'SQL Database & Sync', badge: 'Multi-Device' },
     { id: 'about', label: 'About Us' },
     { id: 'contact', label: 'Contact' },
     { id: 'sitemap', label: 'Site Map' },
-    { id: 'docs', label: 'Dev Tech Stack', badge: 'Full Code' }
+    { id: 'docs', label: 'Dev Tech Stack' }
   ];
 
   const userName = currentUser?.name ? currentUser.name.split(' ')[0] : 'Rider';

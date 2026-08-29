@@ -21,6 +21,7 @@ interface FooterProps {
   onOpenContact?: () => void;
   onOpenSiteMap?: () => void;
   onOpenTechGuides?: (tab?: string) => void;
+  onOpenSqlSchema?: () => void;
   setSelectedBike?: (bike: string) => void;
 }
 
@@ -30,6 +31,7 @@ export const Footer: React.FC<FooterProps> = ({
   onOpenContact, 
   onOpenSiteMap, 
   onOpenTechGuides,
+  onOpenSqlSchema,
   setSelectedBike 
 }) => {
   return (
@@ -179,6 +181,12 @@ export const Footer: React.FC<FooterProps> = ({
                 <button onClick={() => onOpenSiteMap && onOpenSiteMap()} className="hover:text-white transition-colors flex items-center gap-1 text-slate-400">
                   <Layers className="w-3 h-3" />
                   <span>Site Map Directory</span>
+                </button>
+              </li>
+              <li>
+                <button onClick={() => onOpenSqlSchema && onOpenSqlSchema()} className="text-emerald-400 hover:text-emerald-300 font-bold transition-colors flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  <span>SQL Database & Schema</span>
                 </button>
               </li>
               <li>
