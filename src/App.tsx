@@ -267,6 +267,7 @@ export default function App() {
         onOpenTechGuides={() => openTechGuidesWithTab('github')}
         onOpenSqlSchema={() => setIsSqlModalOpen(true)}
         onOpenAuth={handleOpenAuth}
+        onLogout={handleLogout}
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
         selectedBike={selectedBike}
@@ -335,7 +336,8 @@ export default function App() {
             onAddProduct={handleAddProduct}
             onDeleteProduct={handleDeleteProduct}
             currentUser={currentUser}
-            onOpenAuth={() => handleOpenAuth('register')}
+            onOpenAuth={handleOpenAuth}
+            onLogout={handleLogout}
             sellerProducts={products}
             onOpenProductDetail={(prod) => setSelectedProduct(prod)}
             onUpdateUser={handleUpdateUser}
@@ -352,6 +354,7 @@ export default function App() {
             onExploreStore={() => setActiveView('store')}
             onOpenAiBot={() => setIsAiBotOpen(true)}
             onOpenAuth={handleOpenAuth}
+            onLogout={handleLogout}
           />
         )}
 

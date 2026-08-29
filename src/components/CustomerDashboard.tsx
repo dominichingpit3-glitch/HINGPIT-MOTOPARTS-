@@ -17,6 +17,7 @@ import {
   Sparkles,
   CreditCard,
   LogIn,
+  LogOut,
   Users,
   Settings,
   Store
@@ -32,6 +33,7 @@ interface CustomerDashboardProps {
   onExploreStore: () => void;
   onOpenAiBot: () => void;
   onOpenAuth: (mode?: 'login' | 'register' | 'switch') => void;
+  onLogout?: () => void;
 }
 
 export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
@@ -41,7 +43,8 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   onOpenOrderTracker,
   onExploreStore,
   onOpenAiBot,
-  onOpenAuth
+  onOpenAuth,
+  onLogout
 }) => {
   const [activeTab, setActiveTab] = useState<'orders' | 'tracking' | 'garage' | 'settings'>('orders');
   const [trackingQuery, setTrackingQuery] = useState('');
@@ -167,14 +170,26 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2.5 sm:gap-3">
           <button
             onClick={() => onOpenAuth('switch')}
             className="px-3.5 py-2 rounded-xl bg-slate-950/80 hover:bg-slate-900 text-slate-300 hover:text-white border border-slate-700/80 text-xs font-semibold flex items-center gap-1.5 transition-colors"
           >
             <Users className="w-3.5 h-3.5 text-rose-400" />
-            <span>Switch / Manage Accounts</span>
+            <span>Switch / Manage</span>
           </button>
+
+          {onLogout && (
+            <button
+              onClick={onLogout}
+              className="px-3.5 py-2 rounded-xl bg-slate-950/80 hover:bg-rose-950/40 text-slate-300 hover:text-rose-300 border border-slate-700/80 hover:border-rose-500/50 text-xs font-semibold flex items-center gap-1.5 transition-colors"
+              title="Sign Out of your account"
+            >
+              <LogOut className="w-3.5 h-3.5 text-rose-400" />
+              <span>Sign Out</span>
+            </button>
+          )}
+
           <button
             onClick={onOpenAiBot}
             className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold flex items-center gap-1.5 transition-colors shadow-md shadow-rose-600/30"
@@ -549,6 +564,29 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
               Save Profile Changes
             </button>
           </form>
+
+          {/* Sign Out Card */}
+          {onLogout && (
+            <div className="pt-6 border-t border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl bg-slate-950/70 border border-slate-800">
+              <div>
+                <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
+                  <LogOut className="w-3.5 h-3.5 text-rose-400" />
+                  <span>Sign Out of this Device</span>
+                </h4>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  End your current session as {currentUser.name} ({currentUser.email}).
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={onLogout}
+                className="px-4 py-2 bg-rose-950/50 hover:bg-rose-900/80 text-rose-300 hover:text-white border border-rose-800/60 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span>Sign Out Now</span>
+              </button>
+            </div>
+          )}
         </div>
       )}
 

@@ -14,6 +14,7 @@ import {
   Layers,
   Store,
   LogIn,
+  LogOut,
   Trash2,
   Eye,
   AlertCircle
@@ -25,7 +26,8 @@ interface SellerPortalProps {
   onAddProduct: (newProduct: Product) => void;
   onDeleteProduct?: (productId: string) => void;
   currentUser: UserProfile | null;
-  onOpenAuth: () => void;
+  onOpenAuth: (mode?: 'login' | 'register' | 'switch') => void;
+  onLogout?: () => void;
   sellerProducts: Product[];
   onOpenProductDetail?: (product: Product) => void;
   onUpdateUser?: (updated: UserProfile) => void;
@@ -36,6 +38,7 @@ export const SellerPortal: React.FC<SellerPortalProps> = ({
   onDeleteProduct,
   currentUser,
   onOpenAuth,
+  onLogout,
   sellerProducts,
   onOpenProductDetail,
   onUpdateUser
@@ -180,7 +183,7 @@ export const SellerPortal: React.FC<SellerPortalProps> = ({
 
         {/* Current User Merchant Status / CTA */}
         {currentUser ? (
-          <div className="p-4 rounded-xl bg-slate-950/90 border border-emerald-500/30 text-xs space-y-2 min-w-[260px]">
+          <div className="p-4 rounded-xl bg-slate-950/90 border border-emerald-500/30 text-xs space-y-2.5 min-w-[280px]">
             <div className="flex items-center justify-between">
               <span className="text-slate-400 font-bold uppercase tracking-wider text-[10px]">Merchant Status:</span>
               <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-black text-[9px] border border-emerald-500/30">
@@ -197,6 +200,26 @@ export const SellerPortal: React.FC<SellerPortalProps> = ({
             <div className="text-[10px] text-slate-400">
               Escrow released directly to GCash upon courier dispatch.
             </div>
+
+            <div className="flex items-center gap-2 pt-1 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => onOpenAuth('switch')}
+                className="flex-1 py-1.5 px-2 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg text-[11px] font-semibold border border-slate-700 transition-colors text-center"
+              >
+                Switch
+              </button>
+              {onLogout && (
+                <button
+                  type="button"
+                  onClick={onLogout}
+                  className="flex-1 py-1.5 px-2 bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 hover:text-white rounded-lg text-[11px] font-semibold border border-rose-800/60 transition-colors flex items-center justify-center gap-1 text-center"
+                >
+                  <LogOut className="w-3 h-3" />
+                  <span>Sign Out</span>
+                </button>
+              )}
+            </div>
           </div>
         ) : (
           <div className="p-4 rounded-xl bg-rose-950/40 border border-rose-500/40 text-xs space-y-3 min-w-[260px] text-center">
@@ -204,8 +227,8 @@ export const SellerPortal: React.FC<SellerPortalProps> = ({
               Sign in or create a seller account to list your parts
             </p>
             <button
-              onClick={onOpenAuth}
-              className="w-full py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-lg flex items-center justify-center gap-2"
+              onClick={() => onOpenAuth('register')}
+              className="w-full py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-lg flex items-center justify-center gap-2 shadow-md shadow-rose-600/30"
             >
               <LogIn className="w-4 h-4" />
               <span>Create / Sign In Account</span>

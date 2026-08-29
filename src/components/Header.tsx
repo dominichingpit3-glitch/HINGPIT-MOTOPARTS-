@@ -12,7 +12,8 @@ import {
   Wallet,
   Code2,
   Info,
-  Phone
+  Phone,
+  LogOut
 } from 'lucide-react';
 import { MOTORCYCLE_MODELS } from '../data/initialProducts';
 import { UserProfile, ActiveView } from '../types';
@@ -30,6 +31,7 @@ interface HeaderProps {
   onOpenTechGuides?: () => void;
   onOpenSqlSchema?: () => void;
   onOpenAuth?: (mode?: 'login' | 'register' | 'switch') => void;
+  onLogout?: () => void;
   searchQuery: string;
   setSearchQuery: (query: string) => void;
   selectedBike: string;
@@ -50,6 +52,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenTechGuides,
   onOpenSqlSchema,
   onOpenAuth,
+  onLogout,
   searchQuery,
   setSearchQuery,
   selectedBike,
@@ -206,26 +209,41 @@ export const Header: React.FC<HeaderProps> = ({
               <span>AI Mechanic</span>
             </button>
 
-            {/* User Profile / GCash Badge / Sign In Button */}
+            {/* User Profile / GCash Badge / Sign In & Sign Out Buttons */}
             {currentUser ? (
-              <button
-                onClick={() => setActiveView('dashboard')}
-                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold border transition-all ${
-                  activeView === 'dashboard'
-                    ? 'bg-rose-600/20 border-rose-500 text-rose-300'
-                    : 'bg-slate-900/80 border-slate-700/80 text-slate-300 hover:text-white hover:border-slate-600'
-                }`}
-              >
-                <div className="w-5 h-5 rounded-full bg-rose-600 text-white flex items-center justify-center text-[10px] font-black shrink-0">
-                  {currentUser.name.charAt(0)}
-                </div>
-                <div className="hidden xl:flex flex-col text-left text-[11px] leading-tight">
-                  <span className="font-bold text-white truncate max-w-[100px]">{currentUser.name}</span>
-                  <span className="text-[10px] text-emerald-400">
-                    {currentUser.role === 'seller' ? 'Merchant' : `GCash: ••${currentUser.gcashNumber.slice(-4)}`}
-                  </span>
-                </div>
-              </button>
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                <button
+                  onClick={() => setActiveView('dashboard')}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold border transition-all ${
+                    activeView === 'dashboard'
+                      ? 'bg-rose-600/20 border-rose-500 text-rose-300'
+                      : 'bg-slate-900/80 border-slate-700/80 text-slate-300 hover:text-white hover:border-slate-600'
+                  }`}
+                  title="View Profile & Dashboard"
+                >
+                  <div className="w-5 h-5 rounded-full bg-rose-600 text-white flex items-center justify-center text-[10px] font-black shrink-0">
+                    {currentUser.name.charAt(0)}
+                  </div>
+                  <div className="hidden xl:flex flex-col text-left text-[11px] leading-tight">
+                    <span className="font-bold text-white truncate max-w-[90px]">{currentUser.name}</span>
+                    <span className="text-[10px] text-emerald-400">
+                      {currentUser.role === 'seller' ? 'Merchant' : `••${currentUser.gcashNumber.slice(-4)}`}
+                    </span>
+                  </div>
+                </button>
+
+                {onLogout && (
+                  <button
+                    onClick={onLogout}
+                    className="flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-xs font-semibold bg-slate-900/80 border border-slate-700/80 hover:border-rose-500/80 hover:bg-rose-950/40 text-slate-400 hover:text-rose-300 transition-all shrink-0"
+                    title={`Sign Out of ${currentUser.name}`}
+                    aria-label="Sign Out"
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline text-[11px]">Sign Out</span>
+                  </button>
+                )}
+              </div>
             ) : (
               <button
                 onClick={() => onOpenAuth ? onOpenAuth('register') : setActiveView('dashboard')}
@@ -327,6 +345,46 @@ export const Header: React.FC<HeaderProps> = ({
               className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-9 pr-3 py-2 text-xs text-white"
             />
           </div>
+
+          {/* Mobile User Profile / Sign Out Action */}
+          {currentUser ? (
+            <div className="p-3 bg-slate-900/90 rounded-xl border border-slate-800 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-8 h-8 rounded-lg bg-rose-600 text-white flex items-center justify-center font-bold text-xs shrink-0">
+                  {currentUser.name.charAt(0)}
+                </div>
+                <div className="min-w-0">
+                  <div className="text-xs font-bold text-white truncate">{currentUser.name}</div>
+                  <div className="text-[10px] text-emerald-400">
+                    {currentUser.role === 'seller' ? 'Merchant' : `GCash: ••${currentUser.gcashNumber.slice(-4)}`}
+                  </div>
+                </div>
+              </div>
+              {onLogout && (
+                <button
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    onLogout();
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/60 text-xs font-semibold flex items-center gap-1.5 shrink-0"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span>Sign Out</span>
+                </button>
+              )}
+            </div>
+          ) : (
+            <button
+              onClick={() => {
+                setMobileMenuOpen(false);
+                if (onOpenAuth) onOpenAuth('register');
+              }}
+              className="w-full py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold flex items-center justify-center gap-2 shadow-md shadow-rose-600/30"
+            >
+              <User className="w-4 h-4" />
+              <span>Sign In / Create Account</span>
+            </button>
+          )}
 
           <div className="grid grid-cols-2 gap-2 pt-2">
             {navLinks.map((link) => (
