@@ -126,6 +126,14 @@ ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.order_items ENABLE ROW LEVEL SECURITY;
 
 -- 8. RLS POLICIES
+-- Drop existing policies if any to prevent ERROR: 42710 (policy already exists)
+DROP POLICY IF EXISTS "Public products viewable by everyone" ON public.products;
+DROP POLICY IF EXISTS "Public reviews viewable by everyone" ON public.product_reviews;
+DROP POLICY IF EXISTS "Authenticated users can create reviews" ON public.product_reviews;
+DROP POLICY IF EXISTS "Sellers can manage own products" ON public.products;
+DROP POLICY IF EXISTS "Users can view own orders" ON public.orders;
+DROP POLICY IF EXISTS "Users can create orders" ON public.orders;
+
 -- Products & Reviews are publicly readable by all riders
 CREATE POLICY "Public products viewable by everyone" ON public.products FOR SELECT USING (true);
 CREATE POLICY "Public reviews viewable by everyone" ON public.product_reviews FOR SELECT USING (true);

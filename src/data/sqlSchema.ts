@@ -132,21 +132,52 @@ CREATE TABLE IF NOT EXISTS order_items (
 
 CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);
 
--- 7. SUPABASE ROW LEVEL SECURITY (RLS) POLICIES (Optional)
+-- 7. SUPABASE ROW LEVEL SECURITY (RLS) POLICIES
 ALTER TABLE products ENABLE ROW LEVEL SECURITY;
 ALTER TABLE reviews ENABLE ROW LEVEL SECURITY;
 ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE order_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 
--- Allow public read access to active products & reviews
+-- Drop existing policies if any to prevent ERROR: 42710 (policy already exists) when re-running
+DROP POLICY IF EXISTS "Public can view all products" ON products;
+DROP POLICY IF EXISTS "Public can insert products" ON products;
+DROP POLICY IF EXISTS "Public can update products" ON products;
+DROP POLICY IF EXISTS "Public can delete products" ON products;
+
+DROP POLICY IF EXISTS "Public can view all reviews" ON reviews;
+DROP POLICY IF EXISTS "Public can insert reviews" ON reviews;
+
+DROP POLICY IF EXISTS "Public can view users" ON users;
+DROP POLICY IF EXISTS "Public can create users" ON users;
+DROP POLICY IF EXISTS "Public can update users" ON users;
+DROP POLICY IF EXISTS "Public can delete users" ON users;
+
+DROP POLICY IF EXISTS "Public can view orders" ON orders;
+DROP POLICY IF EXISTS "Public can insert orders" ON orders;
+
+DROP POLICY IF EXISTS "Public can view order items" ON order_items;
+DROP POLICY IF EXISTS "Public can insert order items" ON order_items;
+
+-- Create policies
 CREATE POLICY "Public can view all products" ON products FOR SELECT USING (true);
-CREATE POLICY "Public can view all reviews" ON reviews FOR SELECT USING (true);
 CREATE POLICY "Public can insert products" ON products FOR INSERT WITH CHECK (true);
+CREATE POLICY "Public can update products" ON products FOR UPDATE USING (true) WITH CHECK (true);
+CREATE POLICY "Public can delete products" ON products FOR DELETE USING (true);
+
+CREATE POLICY "Public can view all reviews" ON reviews FOR SELECT USING (true);
 CREATE POLICY "Public can insert reviews" ON reviews FOR INSERT WITH CHECK (true);
+
 CREATE POLICY "Public can view users" ON users FOR SELECT USING (true);
 CREATE POLICY "Public can create users" ON users FOR INSERT WITH CHECK (true);
+CREATE POLICY "Public can update users" ON users FOR UPDATE USING (true) WITH CHECK (true);
+CREATE POLICY "Public can delete users" ON users FOR DELETE USING (true);
+
 CREATE POLICY "Public can view orders" ON orders FOR SELECT USING (true);
 CREATE POLICY "Public can insert orders" ON orders FOR INSERT WITH CHECK (true);
+
+CREATE POLICY "Public can view order items" ON order_items FOR SELECT USING (true);
+CREATE POLICY "Public can insert order items" ON order_items FOR INSERT WITH CHECK (true);
 `;
 
 export const SQL_SCHEMA_MYSQL = `-- =========================================================================
