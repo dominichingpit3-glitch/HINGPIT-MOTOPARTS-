@@ -1,7 +1,33 @@
 import { Product, Order, UserProfile, Review } from '../types';
+import { getClientSupabase } from './supabase';
+
+export interface DbStatusResponse {
+  status: string;
+  database: {
+    supabase: 'connected' | 'error_or_table_missing' | 'connection_failed' | 'not_configured';
+    supabaseMessage: string;
+    localCache: string;
+  };
+  stats: {
+    totalProducts: number;
+    totalUsers: number;
+    totalOrders: number;
+  };
+}
 
 export const api = {
-  // 1. Products (Multi-Device Shared)
+  // 0. Database & Supabase Health
+  async getDbStatus(): Promise<DbStatusResponse | null> {
+    try {
+      const res = await fetch('/api/health');
+      if (!res.ok) return null;
+      return await res.json();
+    } catch (err) {
+      return null;
+    }
+  },
+
+  // 1. Products (Multi-Device Shared + Supabase)
   async getProducts(): Promise<Product[]> {
     try {
       const res = await fetch('/api/products');
@@ -16,6 +42,34 @@ export const api = {
 
   async createProduct(product: Partial<Product>): Promise<Product> {
     try {
+      // Also try direct client Supabase insert if configured
+      const supabase = getClientSupabase();
+      if (supabase && product.id) {
+        try {
+          await supabase.from('products').upsert({
+            id: product.id,
+            title: product.title,
+            brand: product.brand || 'Aftermarket',
+            sku: product.sku || `MP-${Math.floor(1000 + Math.random() * 9000)}`,
+            price: product.price || 0,
+            stock: product.stock || 1,
+            category: product.category || 'All Parts',
+            compatible_bikes: product.compatibleBikes || [],
+            bike_type_target: product.bikeTypeTarget || ['universal'],
+            description: product.description || '',
+            images: product.images || [],
+            rating: 5,
+            seller_id: product.sellerId || '',
+            seller_name: product.sellerName || 'Tuning Shop',
+            seller_gcash: product.sellerGcash || '09XXXXXXXXX',
+            condition: product.condition || 'Brand New',
+            warranty_months: product.warrantyMonths || 6
+          });
+        } catch (err) {
+          console.warn('[Direct Client Supabase Product Notice]:', err);
+        }
+      }
+
       const res = await fetch('/api/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -56,6 +110,14 @@ export const api = {
 
   async deleteProduct(productId: string): Promise<boolean> {
     try {
+      const supabase = getClientSupabase();
+      if (supabase) {
+        try {
+          await supabase.from('products').delete().eq('id', productId);
+        } catch (err) {
+          // ignore
+        }
+      }
       const res = await fetch(`/api/products/${productId}`, { method: 'DELETE' });
       return res.ok;
     } catch (err) {
@@ -79,7 +141,7 @@ export const api = {
     }
   },
 
-  // 2. Users & Authentication (Multi-Device Shared)
+  // 2. Users & Authentication (Multi-Device Shared + Supabase)
   async getUsers(): Promise<UserProfile[]> {
     try {
       const res = await fetch('/api/users');
@@ -92,8 +154,38 @@ export const api = {
     }
   },
 
-  async register(user: Partial<UserProfile>): Promise<UserProfile> {
+  async register(user: Partial<UserProfile>): Promise<{ user: UserProfile; supabaseStatus?: any }> {
     try {
+      // 1. Direct client Supabase insertion if client keys are set
+      const supabase = getClientSupabase();
+      if (supabase) {
+        try {
+          const supabaseRow = {
+            id: user.id || `usr-${Date.now()}`,
+            name: user.name,
+            email: (user.email || '').toLowerCase().trim(),
+            password_hash: user.password || null,
+            phone: user.phone || '',
+            gcash_number: user.gcashNumber || '',
+            role: user.role || 'buyer',
+            store_name: user.storeName || null,
+            address: user.address || '',
+            barangay: user.barangay || null,
+            city: user.city || '',
+            province: user.province || '',
+            zip_code: user.zipCode || null,
+            garage_bikes: user.garageBikes || []
+          };
+          const { error } = await supabase.from('users').upsert(supabaseRow, { onConflict: 'email' });
+          if (!error) {
+            console.log('[Direct Client Supabase] Inserted user account successfully!');
+          }
+        } catch (clientErr) {
+          console.warn('[Direct Client Supabase User Notice]:', clientErr);
+        }
+      }
+
+      // 2. Server API Route (which has server-side Supabase bridge with service key)
       const res = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -101,7 +193,10 @@ export const api = {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to register account');
-      return data.user;
+      return {
+        user: data.user,
+        supabaseStatus: data.supabase
+      };
     } catch (err: any) {
       console.error('API register error:', err);
       const localUser: UserProfile = {
@@ -119,7 +214,7 @@ export const api = {
         zipCode: user.zipCode || '1100',
         garageBikes: user.garageBikes || ['Honda Click 125i / 160']
       };
-      return localUser;
+      return { user: localUser };
     }
   },
 
@@ -156,7 +251,7 @@ export const api = {
     }
   },
 
-  // 3. Orders (Multi-Device Shared)
+  // 3. Orders (Multi-Device Shared + Supabase)
   async getOrders(): Promise<Order[]> {
     try {
       const res = await fetch('/api/orders');

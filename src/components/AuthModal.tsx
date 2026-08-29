@@ -216,13 +216,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               className={`flex-1 py-3 px-4 flex items-center justify-center gap-2 border-b-2 transition-all ${
                 tab === 'accounts'
                   ? 'border-rose-500 text-rose-400 bg-rose-950/20'
-                  : 'border-transparent text-slate-400 hover:text-slate-200'
+                : 'border-transparent text-slate-400 hover:text-slate-200'
               }`}
             >
               <Users className="w-4 h-4" />
               <span>Saved Accounts ({registeredAccounts.length})</span>
             </button>
           )}
+        </div>
+
+        {/* Supabase Database Status Notice */}
+        <div className="px-5 py-2.5 bg-emerald-950/30 border-b border-emerald-900/40 flex items-center justify-between text-[11px]">
+          <div className="flex items-center gap-2 text-emerald-300 font-semibold">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+            <span>Target Table: <strong className="text-white font-mono">public.users</strong> (Supabase PostgreSQL)</span>
+          </div>
+          <span className="text-[10px] text-emerald-400/80 hidden sm:inline">
+            Multi-Device Live Sync
+          </span>
         </div>
 
         {/* Modal Body */}

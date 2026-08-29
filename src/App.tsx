@@ -102,7 +102,8 @@ export default function App() {
   };
 
   const handleRegister = async (newUser: UserProfile) => {
-    const savedUser = await api.register(newUser);
+    const result = await api.register(newUser);
+    const savedUser = result.user || newUser;
     setCurrentUser(savedUser);
     syncServerData();
   };
