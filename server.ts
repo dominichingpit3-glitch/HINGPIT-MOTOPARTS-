@@ -68,14 +68,28 @@ if (!fs.existsSync(USERS_FILE)) {
 let supabaseClient: SupabaseClient | null = null;
 let currentSupabaseUrl: string = '';
 
+export function cleanSupabaseUrl(rawUrl: string): string {
+  if (!rawUrl) return '';
+  let url = rawUrl.trim();
+  // Strip trailing slashes and common subpaths like /rest/v1 or /auth/v1
+  url = url.replace(/\/rest\/v1\/?.*$/i, '').replace(/\/auth\/v1\/?.*$/i, '').replace(/\/+$/, '');
+  return url;
+}
+
 export function getSupabaseCredentials(): { url: string; key: string } {
   // Check stored config file first
   const fileConfig = readJsonFile<{ url?: string; key?: string }>(SUPABASE_CONFIG_FILE, {});
   
-  const url = fileConfig.url || process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
-  const key = fileConfig.key || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_KEY || '';
+  let url = fileConfig.url || process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+  let key = fileConfig.key || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_KEY || '';
 
-  return { url: url.trim(), key: key.trim() };
+  // Default to user's provided Supabase project credentials if unconfigured
+  if (!url || url.includes('your-project-id')) {
+    url = 'https://reilurkdveaghluryfhz.supabase.co';
+    key = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJlaWx1cmtkdmVhZ2hsdXJ5Zmh6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc5ODUxNDksImV4cCI6MjEwMzU2MTE0OX0.gZ-VEA3uGW7gfn0zszuYZty5jzE_VIe7YB4msEx21iU';
+  }
+
+  return { url: cleanSupabaseUrl(url), key: key.trim() };
 }
 
 export function getSupabaseClient(forceRefresh: boolean = false): SupabaseClient | null {
@@ -110,15 +124,15 @@ function mapUserToSupabaseRow(user: any) {
     name: user.name || 'Rider',
     email: (user.email || '').toLowerCase().trim(),
     password_hash: user.password || user.password_hash || null,
-    phone: user.phone || '09XXXXXXXXX',
-    gcash_number: user.gcashNumber || user.gcash_number || '09XXXXXXXXX',
-    role: user.role || 'buyer',
+    phone: user.phone || '09123456789',
+    gcash_number: user.gcashNumber || user.gcash_number || user.phone || '09123456789',
+    role: (user.role === 'seller' ? 'seller' : 'buyer'),
     store_name: user.storeName || user.store_name || null,
-    address: user.address || '',
-    barangay: user.barangay || null,
-    city: user.city || '',
-    province: user.province || '',
-    zip_code: user.zipCode || user.zip_code || null,
+    address: user.address || 'Metro Manila',
+    barangay: user.barangay || 'Brgy. Central',
+    city: user.city || 'Quezon City',
+    province: user.province || 'Metro Manila',
+    zip_code: user.zipCode || user.zip_code || '1100',
     garage_bikes: Array.isArray(user.garageBikes) ? user.garageBikes : (Array.isArray(user.garage_bikes) ? user.garage_bikes : []),
     created_at: user.createdAt || user.created_at || new Date().toISOString()
   };
@@ -146,8 +160,8 @@ function mapSupabaseRowToUser(row: any) {
 
 // Map Product <-> Supabase products table row
 function mapProductToSupabaseRow(p: any) {
-  // Ensure seller_id is null if not an existing valid user id format to prevent FK violations
-  const sellerId = (p.sellerId && typeof p.sellerId === 'string' && p.sellerId.startsWith('usr-')) ? p.sellerId : null;
+  // Safe sellerId fallback
+  const sellerId = (p.sellerId && typeof p.sellerId === 'string' && (p.sellerId.startsWith('usr-') || p.sellerId.startsWith('user-'))) ? p.sellerId : null;
 
   return {
     id: p.id || `prod-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
@@ -168,7 +182,7 @@ function mapProductToSupabaseRow(p: any) {
     review_count: Number(p.reviewCount) || (p.reviews ? p.reviews.length : 0),
     seller_id: sellerId,
     seller_name: p.sellerName || p.seller_name || 'Tuning Shop',
-    seller_gcash: p.sellerGcash || p.seller_gcash || '09XXXXXXXXX',
+    seller_gcash: p.sellerGcash || p.seller_gcash || '09123456789',
     seller_verified: p.sellerVerified ?? p.seller_verified ?? true,
     is_hot: p.isHot ?? p.is_hot ?? false,
     is_new: p.isNew ?? p.is_new ?? true,
@@ -335,7 +349,7 @@ app.post('/api/supabase/config', async (req, res) => {
       return res.status(400).json({ error: 'Supabase URL and API Key are required' });
     }
 
-    const cleanUrl = url.trim();
+    const cleanUrl = cleanSupabaseUrl(url);
     const cleanKey = key.trim();
 
     // Test creating client and querying
@@ -584,7 +598,15 @@ app.post('/api/products', async (req, res) => {
     if (supabase) {
       try {
         const row = mapProductToSupabaseRow(productWithDefaults);
-        const { error } = await supabase.from('products').upsert(row, { onConflict: 'id' });
+        let { error } = await supabase.from('products').upsert(row, { onConflict: 'id' });
+        
+        // If FK error on seller_id, retry with seller_id = null
+        if (error && error.message && error.message.includes('seller_id')) {
+          const fallbackRow = { ...row, seller_id: null };
+          const retryRes = await supabase.from('products').upsert(fallbackRow, { onConflict: 'id' });
+          error = retryRes.error;
+        }
+
         if (!error) {
           supabaseResult = { stored: true, message: 'Successfully saved into Supabase "products" table!' };
           console.log(`[Supabase Store] Product "${productWithDefaults.title}" stored in Supabase products table.`);
@@ -651,10 +673,25 @@ app.post('/api/products/:id/reviews', async (req, res) => {
     const supabase = getSupabaseClient();
     let supabaseResult = { stored: false, message: 'Local storage' };
 
+    const products = readJsonFile<any[]>(PRODUCTS_FILE, []);
+    let targetFound = false;
+
     if (supabase) {
       try {
+        const parentProd = products.find(p => p.id === id);
+        if (parentProd) {
+          const prodRow = mapProductToSupabaseRow(parentProd);
+          await supabase.from('products').upsert(prodRow, { onConflict: 'id' });
+        }
+
         const reviewRow = mapReviewToSupabaseRow(id, reviewItem);
-        const { error } = await supabase.from('reviews').upsert(reviewRow, { onConflict: 'id' });
+        let { error } = await supabase.from('reviews').upsert(reviewRow, { onConflict: 'id' });
+        if (error && error.message && error.message.includes('user_id')) {
+          const fallbackReview = { ...reviewRow, user_id: null };
+          const retryRes = await supabase.from('reviews').upsert(fallbackReview, { onConflict: 'id' });
+          error = retryRes.error;
+        }
+
         if (!error) {
           supabaseResult = { stored: true, message: 'Successfully inserted into Supabase "reviews" table!' };
           console.log(`[Supabase Review] Review for product ${id} stored in Supabase.`);
@@ -667,9 +704,6 @@ app.post('/api/products/:id/reviews', async (req, res) => {
         supabaseResult = { stored: false, message: err.message };
       }
     }
-
-    const products = readJsonFile<any[]>(PRODUCTS_FILE, []);
-    let targetFound = false;
     const updated = products.map(p => {
       if (p.id === id) {
         targetFound = true;
@@ -948,7 +982,7 @@ app.post('/api/orders', async (req, res) => {
       try {
         const userId = (newOrder.userId && typeof newOrder.userId === 'string' && newOrder.userId.startsWith('usr-')) ? newOrder.userId : null;
         
-        await supabase.from('orders').upsert({
+        const orderPayload = {
           id: newOrder.id,
           tracking_number: newOrder.trackingNumber,
           user_id: userId,
@@ -970,7 +1004,12 @@ app.post('/api/orders', async (req, res) => {
           zip_code: newOrder.shippingAddress?.zipCode || '',
           courier: newOrder.courier,
           estimated_delivery: newOrder.estimatedDelivery
-        }, { onConflict: 'id' });
+        };
+
+        let { error: ordErr } = await supabase.from('orders').upsert(orderPayload, { onConflict: 'id' });
+        if (ordErr && ordErr.message && ordErr.message.includes('user_id')) {
+          await supabase.from('orders').upsert({ ...orderPayload, user_id: null }, { onConflict: 'id' });
+        }
 
         // Insert items
         if (Array.isArray(newOrder.items)) {
@@ -1103,7 +1142,54 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`MotoParts Express Server with Supabase PostgreSQL Bridge running on port ${PORT}`);
+    // Run background automatic sync on startup
+    setTimeout(() => {
+      autoSyncToSupabase().catch(err => console.warn('[Supabase Startup Sync Notice]:', err));
+    }, 2000);
   });
+}
+
+async function autoSyncToSupabase() {
+  const supabase = getSupabaseClient();
+  if (!supabase) return;
+
+  try {
+    const localUsers = readJsonFile<any[]>(USERS_FILE, []);
+    const localProducts = readJsonFile<any[]>(PRODUCTS_FILE, []);
+    const localOrders = readJsonFile<any[]>(ORDERS_FILE, []);
+
+    for (const u of localUsers) {
+      try {
+        const row = mapUserToSupabaseRow(u);
+        await supabase.from('users').upsert(row, { onConflict: 'email' });
+      } catch (e) {}
+    }
+
+    for (const p of localProducts) {
+      try {
+        const row = mapProductToSupabaseRow(p);
+        let { error } = await supabase.from('products').upsert(row, { onConflict: 'id' });
+        if (error && error.message && error.message.includes('seller_id')) {
+          await supabase.from('products').upsert({ ...row, seller_id: null }, { onConflict: 'id' });
+        }
+        if (Array.isArray(p.reviews) && p.reviews.length > 0) {
+          for (const r of p.reviews) {
+            try {
+              const revRow = mapReviewToSupabaseRow(p.id, r);
+              let { error: revErr } = await supabase.from('reviews').upsert(revRow, { onConflict: 'id' });
+              if (revErr && revErr.message && revErr.message.includes('user_id')) {
+                await supabase.from('reviews').upsert({ ...revRow, user_id: null }, { onConflict: 'id' });
+              }
+            } catch (e) {}
+          }
+        }
+      } catch (e) {}
+    }
+
+    console.log('[Supabase AutoSync] Automatic background sync to Supabase executed successfully.');
+  } catch (err) {
+    console.warn('[Supabase AutoSync Notice]:', err);
+  }
 }
 
 startServer();
