@@ -1,0 +1,7 @@
+{
+  "name": "MotoParts Express - Street Bike & Scooter Performance Hub",
+  "description": "Premium e-commerce platform for street bike, underbone, and scooter motorcycle parts with PayMongo GCash payments, seller portal, and AI motorcycle mechanic.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
